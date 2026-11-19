@@ -407,6 +407,26 @@ function HospitalApp({ user, token, allowedPortals, onLogout }) {
   const [shiftSubmitting, setShiftSubmitting] = useState(false);
   const [shiftMessage, setShiftMessage] = useState("");
 
+  // Administrator Payroll State
+  const [adminPayrollPeriods, setAdminPayrollPeriods] = useState([]);
+  const [adminPayrollEmployees, setAdminPayrollEmployees] = useState([]);
+  const [adminPayrollEmployeesLoading, setAdminPayrollEmployeesLoading] =
+    useState(false);
+  const [adminPayrollEmployeesError, setAdminPayrollEmployeesError] =
+    useState("");
+  const [selectedPayrollEmployee, setSelectedPayrollEmployee] = useState("");
+  const [payrollGenerating, setPayrollGenerating] = useState(false);
+  const [adminPayrollLoading, setAdminPayrollLoading] = useState(false);
+  const [adminPayrollError, setAdminPayrollError] = useState("");
+  const [selectedPayrollPeriod, setSelectedPayrollPeriod] = useState("");
+  const [adminPayrollRecords, setAdminPayrollRecords] = useState([]);
+  const [adminPayrollSummary, setAdminPayrollSummary] = useState(null);
+  const [adminPayrollPeriodDetails, setAdminPayrollPeriodDetails] =
+    useState(null);
+  const [adminPayrollRecordsLoading, setAdminPayrollRecordsLoading] =
+    useState(false);
+  const [adminPayrollRecordsError, setAdminPayrollRecordsError] = useState("");
+
   async function loadEmployeeProfile() {
     if (!token) return;
 
@@ -433,6 +453,68 @@ function HospitalApp({ user, token, allowedPortals, onLogout }) {
       setProfileError(error.message);
     } finally {
       setProfileLoading(false);
+    }
+  }
+
+  async function loadAdminPayrollPeriods() {
+    if (!token) return;
+
+    setAdminPayrollLoading(true);
+    setAdminPayrollError("");
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/payroll/periods`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.message || "Unable to retrieve payroll periods.");
+      }
+
+      setAdminPayrollPeriods(data.periods || []);
+    } catch (error) {
+      setAdminPayrollError(error.message);
+    } finally {
+      setAdminPayrollLoading(false);
+    }
+  }
+
+  async function loadAdminPayrollRecords(periodId) {
+    if (!token || !periodId) return;
+
+    setAdminPayrollRecordsLoading(true);
+    setAdminPayrollRecordsError("");
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/payroll/periods/${encodeURIComponent(periodId)}/records`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.message || "Unable to retrieve payroll records.");
+      }
+
+      setAdminPayrollRecords(data.records || []);
+      setAdminPayrollSummary(data.summary || null);
+      setAdminPayrollPeriodDetails(data.period || null);
+    } catch (error) {
+      setAdminPayrollRecordsError(error.message);
+      setAdminPayrollRecords([]);
+      setAdminPayrollSummary(null);
+      setAdminPayrollPeriodDetails(null);
+    } finally {
+      setAdminPayrollRecordsLoading(false);
     }
   }
 
@@ -677,6 +759,24 @@ function HospitalApp({ user, token, allowedPortals, onLogout }) {
   }, [portal, page, token]);
 
   useEffect(() => {
+    if (portal === "Administrator" && page === "Payroll") {
+      loadAdminPayrollPeriods();
+    }
+  }, [portal, page, token]);
+
+  useEffect(() => {
+    if (
+      portal === "Administrator" &&
+      page === "Payroll" &&
+      selectedPayrollPeriod
+    ) {
+      loadAdminPayrollRecords(selectedPayrollPeriod);
+    } else {
+      setAdminPayrollRecords([]);
+    }
+  }, [portal, page, selectedPayrollPeriod, token]);
+
+  useEffect(() => {
     if (portal === "Employee") {
       loadEmployeeProfile();
     }
@@ -913,6 +1013,18 @@ function HospitalApp({ user, token, allowedPortals, onLogout }) {
               setAdminAttendanceSearch={setAdminAttendanceSearch}
               adminAttendanceDepartment={adminAttendanceDepartment}
               setAdminAttendanceDepartment={setAdminAttendanceDepartment}
+              adminPayrollPeriods={adminPayrollPeriods}
+              adminPayrollLoading={adminPayrollLoading}
+              adminPayrollError={adminPayrollError}
+              loadAdminPayrollPeriods={loadAdminPayrollPeriods}
+              selectedPayrollPeriod={selectedPayrollPeriod}
+              setSelectedPayrollPeriod={setSelectedPayrollPeriod}
+              adminPayrollRecords={adminPayrollRecords}
+              adminPayrollSummary={adminPayrollSummary}
+              adminPayrollPeriodDetails={adminPayrollPeriodDetails}
+              adminPayrollRecordsLoading={adminPayrollRecordsLoading}
+              adminPayrollRecordsError={adminPayrollRecordsError}
+              loadAdminPayrollRecords={loadAdminPayrollRecords}
             />
           )}
           {portal === "Employee" && (
@@ -987,6 +1099,18 @@ function AdminPage({
   page,
   notify,
   token,
+  adminPayrollPeriods,
+  adminPayrollLoading,
+  adminPayrollError,
+  loadAdminPayrollPeriods,
+  selectedPayrollPeriod,
+  setSelectedPayrollPeriod,
+  adminPayrollRecords,
+  adminPayrollSummary,
+  adminPayrollPeriodDetails,
+  adminPayrollRecordsLoading,
+  adminPayrollRecordsError,
+  loadAdminPayrollRecords,
   adminAttendanceData,
   adminAttendanceLoading,
   adminAttendanceError,
@@ -1844,6 +1968,188 @@ function AdminPage({
       </>
     );
   }
+
+  if (page === "Payroll") {
+    const summary = adminPayrollSummary || {};
+
+    const formatPayrollMoney = (amount) =>
+      `KSh ${Number(amount || 0).toLocaleString("en-KE", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })}`;
+
+    return (
+      <>
+        <Panel
+          title="Payroll Management"
+          action="Refresh"
+          onAction={loadAdminPayrollPeriods}
+        >
+          {adminPayrollError && (
+            <div className="alert alert-error">{adminPayrollError}</div>
+          )}
+
+          {adminPayrollLoading ? (
+            <p>Loading payroll periods...</p>
+          ) : adminPayrollPeriods.length === 0 ? (
+            <p>
+              No payroll periods found. Create a payroll period to get started.
+            </p>
+          ) : (
+            <div style={{ maxWidth: "420px" }}>
+              <label>Select payroll period</label>
+              <select
+                value={selectedPayrollPeriod}
+                onChange={(e) => setSelectedPayrollPeriod(e.target.value)}
+                style={{ width: "100%", padding: "10px" }}
+              >
+                <option value="">Choose a payroll period</option>
+                {adminPayrollPeriods.map((period) => (
+                  <option key={period.id} value={period.id}>
+                    {period.period_name} — {period.period_status}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </Panel>
+
+        {selectedPayrollPeriod && (
+          <>
+            <Stats
+              items={[
+                [
+                  "Employees",
+                  summary.total_employees || 0,
+                  "In selected period",
+                  Users,
+                ],
+                [
+                  "Gross salary",
+                  formatPayrollMoney(summary.total_gross_salary),
+                  "Total gross earnings",
+                  Wallet,
+                ],
+                [
+                  "Total deductions",
+                  formatPayrollMoney(summary.total_deductions),
+                  "Employee deductions",
+                  TrendingDown,
+                ],
+                [
+                  "Net payroll",
+                  formatPayrollMoney(summary.total_net_salary),
+                  "Take-home pay",
+                  Banknote,
+                ],
+              ]}
+            />
+
+            <Panel title="Selected payroll period">
+              {adminPayrollPeriodDetails ? (
+                <div>
+                  <p>
+                    <strong>Period:</strong>{" "}
+                    {adminPayrollPeriodDetails.period_name}
+                  </p>
+                  <p>
+                    <strong>Start date:</strong>{" "}
+                    {String(adminPayrollPeriodDetails.start_date).slice(0, 10)}
+                  </p>
+                  <p>
+                    <strong>End date:</strong>{" "}
+                    {String(adminPayrollPeriodDetails.end_date).slice(0, 10)}
+                  </p>
+                  <p>
+                    <strong>Payment date:</strong>{" "}
+                    {adminPayrollPeriodDetails.payment_date
+                      ? String(adminPayrollPeriodDetails.payment_date).slice(
+                          0,
+                          10,
+                        )
+                      : "Not scheduled"}
+                  </p>
+                  <p>
+                    <strong>Status:</strong>{" "}
+                    {adminPayrollPeriodDetails.period_status}
+                  </p>
+                </div>
+              ) : (
+                <p>Select a payroll period to view its details.</p>
+              )}
+            </Panel>
+
+            <Panel
+              title="Employee payroll records"
+              action="Refresh records"
+              onAction={() => loadAdminPayrollRecords(selectedPayrollPeriod)}
+            >
+              {adminPayrollRecordsError && (
+                <div className="alert alert-error">
+                  {adminPayrollRecordsError}
+                </div>
+              )}
+
+              {adminPayrollRecordsLoading ? (
+                <p>Loading employee payroll records...</p>
+              ) : adminPayrollRecords.length === 0 ? (
+                <p>No employee payroll records found for this period.</p>
+              ) : (
+                <div style={{ overflowX: "auto" }}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>EMPLOYEE</th>
+                        <th>DEPARTMENT</th>
+                        <th>BASIC SALARY</th>
+                        <th>GROSS SALARY</th>
+                        <th>DEDUCTIONS</th>
+                        <th>NET SALARY</th>
+                        <th>PAYMENT STATUS</th>
+                      </tr>
+                    </thead>
+
+                    <tbody>
+                      {adminPayrollRecords.map((record) => (
+                        <tr key={record.id}>
+                          <td>
+                            <strong>
+                              {record.first_name} {record.last_name}
+                            </strong>
+                            <br />
+                            <small>{record.employee_number}</small>
+                          </td>
+
+                          <td>{record.department_name || "Not assigned"}</td>
+
+                          <td>{formatPayrollMoney(record.basic_salary)}</td>
+
+                          <td>{formatPayrollMoney(record.gross_salary)}</td>
+
+                          <td>{formatPayrollMoney(record.total_deductions)}</td>
+
+                          <td>
+                            <strong>
+                              {formatPayrollMoney(record.net_salary)}
+                            </strong>
+                          </td>
+
+                          <td>
+                            <strong>{record.payment_status}</strong>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Panel>
+          </>
+        )}
+      </>
+    );
+  }
+
   if (page === "Departments")
     return (
       <div className="card-grid">
@@ -2092,6 +2398,9 @@ function EmployeePage({
   const [attendanceHistoryLoading, setAttendanceHistoryLoading] =
     useState(false);
   const [attendanceHistoryError, setAttendanceHistoryError] = useState("");
+  const [payslips, setPayslips] = useState([]);
+  const [payslipsLoading, setPayslipsLoading] = useState(false);
+  const [payslipsError, setPayslipsError] = useState("");
   const [attendanceActionLoading, setAttendanceActionLoading] = useState(false);
   const [attendanceActionMessage, setAttendanceActionMessage] = useState("");
 
@@ -2133,6 +2442,74 @@ function EmployeePage({
       setAttendanceHistoryLoading(false);
     }
   }
+
+  async function loadPayslips() {
+    if (!token) return;
+
+    setPayslipsLoading(true);
+    setPayslipsError("");
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/payroll/my-payslips`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.message || "Unable to retrieve payslips.");
+      }
+
+      setPayslips(data.payslips || []);
+    } catch (error) {
+      setPayslipsError(error.message);
+    } finally {
+      setPayslipsLoading(false);
+    }
+  }
+
+  async function handleDownloadPayslip(recordId, periodName) {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/payroll/my-payslips/${recordId}/pdf`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.message || "Unable to download payslip.");
+      }
+
+      const blob = await response.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = `Payslip_${periodName}.pdf`;
+
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      window.URL.revokeObjectURL(downloadUrl);
+
+      notify("Payslip downloaded successfully.");
+    } catch (error) {
+      notify(error.message);
+    }
+  }
+
+  useEffect(() => {
+    if (page === "My Payslips" && token) {
+      loadPayslips();
+    }
+  }, [page, token]);
 
   async function handleAttendanceAction(action) {
     if (!token || attendanceActionLoading) return;
@@ -2531,55 +2908,141 @@ function EmployeePage({
     );
   }
 
-  if (page === "My Payslips")
+  if (page === "My Payslips") {
+    const latestPayslip = payslips[0];
+
     return (
       <>
-        <div className="payslip-highlight">
-          <div>
-            <span>November 2026 · Net salary</span>
-            <h2>KSh 62,450.00</h2>
-            <small>Illustrative sample payslip — not an actual payment</small>
-          </div>
-          <button
-            className="btn btn-primary"
-            onClick={() =>
-              notify("Payslip PDF download will be connected to the backend.")
-            }
-          >
-            <Download size={16} /> Download payslip
-          </button>
-        </div>
-        <div className="dashboard-grid">
-          <Panel title="Earnings">
-            <MoneyRow label="Basic salary" value="KSh 70,000.00" />
-            <MoneyRow label="House allowance" value="KSh 10,000.00" />
-            <MoneyRow label="Other allowances" value="KSh 2,500.00" />
-            <MoneyRow label="Gross pay" value="KSh 82,500.00" total />
+        {payslipsLoading && payslips.length === 0 ? (
+          <Panel title="My Payslips">
+            <p>Loading your payslips...</p>
           </Panel>
-          <Panel title="Deductions">
-            <MoneyRow label="PAYE" value="KSh 9,000.00" />
-            <MoneyRow label="NSSF" value="KSh 4,200.00" />
-            <MoneyRow label="SHIF" value="KSh 1,650.00" />
-            <MoneyRow label="Housing levy" value="KSh 825.00" />
-            <MoneyRow label="Total deductions" value="KSh 15,675.00" total />
+        ) : payslipsError ? (
+          <Panel title="My Payslips">
+            <div className="notice">
+              <ShieldCheck size={18} />
+              {payslipsError}
+            </div>
+            <button className="btn btn-primary" onClick={loadPayslips}>
+              Retry
+            </button>
           </Panel>
-        </div>
-        <div className="notice">
-          <ShieldCheck size={18} /> Figures are examples only. Actual statutory
-          deductions must use current official Kenyan rates and the employee's
-          applicable tax circumstances.
-        </div>
-        <Panel title="Previous payslips">
-          <SimpleTable
-            headers={["PERIOD", "GROSS PAY", "NET PAY", "STATUS", ""]}
-            rows={[
-              ["October 2026", "KSh 82,500", "KSh 62,450", "Paid", "View"],
-              ["September 2026", "KSh 82,500", "KSh 62,100", "Paid", "View"],
-            ]}
-          />
-        </Panel>
+        ) : payslips.length === 0 ? (
+          <Panel title="My Payslips">
+            <p>No approved or paid payslips are available yet.</p>
+          </Panel>
+        ) : (
+          <>
+            <div className="page-actions">
+              <button
+                className="btn btn-secondary"
+                onClick={loadPayslips}
+                disabled={payslipsLoading}
+              >
+                {payslipsLoading ? "Refreshing..." : "Refresh payslips"}
+              </button>
+            </div>
+
+            <div className="payslip-highlight">
+              <div>
+                <span>{latestPayslip.period_name} · Net salary</span>
+                <h2>{formatCurrency(latestPayslip.net_salary)}</h2>
+                <small>Payment status: {latestPayslip.payment_status}</small>
+                <small>
+                  Payment date:{" "}
+                  {latestPayslip.payment_date
+                    ? formatDate(latestPayslip.payment_date)
+                    : "Not yet paid"}
+                </small>
+              </div>
+              <button
+                className="btn btn-primary"
+                onClick={() =>
+                  handleDownloadPayslip(
+                    latestPayslip.payroll_record_id,
+                    latestPayslip.period_name,
+                  )
+                }
+              >
+                <Download size={16} />
+                Download payslip
+              </button>
+            </div>
+
+            <div className="dashboard-grid">
+              <Panel title="Earnings">
+                {latestPayslip.payroll_items
+                  ?.filter((item) => item.item_type === "EARNING")
+                  .map((item) => (
+                    <MoneyRow
+                      key={item.id}
+                      label={item.description}
+                      value={formatCurrency(item.amount)}
+                    />
+                  ))}
+
+                <MoneyRow
+                  label="Gross pay"
+                  value={formatCurrency(latestPayslip.gross_salary)}
+                  total
+                />
+              </Panel>
+
+              <Panel title="Deductions">
+                {latestPayslip.payroll_items
+                  ?.filter((item) => item.item_type === "DEDUCTION")
+                  .map((item) => (
+                    <MoneyRow
+                      key={item.id}
+                      label={item.description}
+                      value={formatCurrency(item.amount)}
+                    />
+                  ))}
+
+                <MoneyRow
+                  label="Total deductions"
+                  value={formatCurrency(latestPayslip.total_deductions)}
+                  total
+                />
+              </Panel>
+            </div>
+
+            <Panel title="Employer Contributions">
+              {latestPayslip.payroll_items
+                ?.filter((item) => item.item_type === "EMPLOYER_CONTRIBUTION")
+                .map((item) => (
+                  <MoneyRow
+                    key={item.id}
+                    label={item.description}
+                    value={formatCurrency(item.amount)}
+                  />
+                ))}
+
+              {!latestPayslip.payroll_items?.some(
+                (item) => item.item_type === "EMPLOYER_CONTRIBUTION",
+              ) && <p>No employer contributions recorded.</p>}
+            </Panel>
+
+            <Panel title="Previous payslips">
+              <SimpleTable
+                headers={["PERIOD", "GROSS PAY", "NET PAY", "STATUS"]}
+                rows={payslips
+                  .slice(1)
+                  .map((payslip) => [
+                    payslip.period_name,
+                    formatCurrency(payslip.gross_salary),
+                    formatCurrency(payslip.net_salary),
+                    payslip.payment_status,
+                  ])}
+              />
+              {payslips.length === 1 && <p>No previous payslips available.</p>}
+            </Panel>
+          </>
+        )}
       </>
     );
+  }
+
   if (page === "My Shifts") {
     return (
       <Panel title="My shift schedule" subtitle="Upcoming assigned shifts">
