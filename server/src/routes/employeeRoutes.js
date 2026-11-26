@@ -2093,4 +2093,310 @@ router.post(
   },
 );
 
+// GET /api/employees/options
+// Retrieve departments, positions and supervisors for employee forms.
+router.get(
+  "/options",
+  authenticateToken,
+  requireRole("SUPER_ADMIN", "HR_MANAGER"),
+  async (req, res) => {
+    try {
+      const [departments, positions, supervisors] = await Promise.all([
+        pool.query(
+          `SELECT id, department_name
+           FROM departments
+           ORDER BY department_name`,
+        ),
+        pool.query(
+          `SELECT id, department_id, position_title
+           FROM positions
+           ORDER BY position_title`,
+        ),
+        pool.query(
+          `SELECT id, employee_number, first_name, last_name
+           FROM employees
+           ORDER BY first_name, last_name`,
+        ),
+      ]);
+
+      return res.json({
+        status: "success",
+        departments: departments.rows,
+        positions: positions.rows,
+        supervisors: supervisors.rows,
+      });
+    } catch (error) {
+      console.error("Employee options retrieval error:", error);
+
+      return res.status(500).json({
+        status: "error",
+        message: "Unable to retrieve employee form options.",
+      });
+    }
+  },
+);
+
+// GET /api/employees/:employeeId
+// Retrieve an individual employee profile for administrators and HR managers.
+router.get(
+  "/:employeeId",
+  authenticateToken,
+  requireRole("SUPER_ADMIN", "HR_MANAGER"),
+  async (req, res) => {
+    try {
+      const { employeeId } = req.params;
+
+      const uuidPattern =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+      if (!uuidPattern.test(employeeId)) {
+        return res.status(400).json({
+          status: "error",
+          message: "Invalid employee ID.",
+        });
+      }
+
+      const result = await pool.query(
+        `SELECT
+           e.id,
+           e.employee_number,
+           e.first_name,
+           e.last_name,
+           e.department_id,
+e.position_id,
+e.supervisor_id,
+           e.gender,
+           e.date_of_birth,
+           e.personal_email,
+           e.phone,
+           e.address,
+           e.hire_date,
+           e.employment_type,
+           e.employment_status,
+           e.base_salary,
+           d.department_name,
+           p.position_title,
+           s.first_name || ' ' || s.last_name AS supervisor_name
+         FROM employees e
+         LEFT JOIN departments d ON e.department_id = d.id
+         LEFT JOIN positions p ON e.position_id = p.id
+         LEFT JOIN employees s ON e.supervisor_id = s.id
+         WHERE e.id = $1`,
+        [employeeId],
+      );
+
+      if (result.rowCount === 0) {
+        return res.status(404).json({
+          status: "error",
+          message: "Employee profile not found.",
+        });
+      }
+
+      return res.json({
+        status: "success",
+        employee: result.rows[0],
+      });
+    } catch (error) {
+      console.error("Employee profile retrieval error:", error);
+
+      return res.status(500).json({
+        status: "error",
+        message: "Unable to retrieve employee profile.",
+      });
+    }
+  },
+);
+
+// PUT /api/employees/:employeeId
+// Update an employee profile.
+router.put(
+  "/:employeeId",
+  authenticateToken,
+  requireRole("SUPER_ADMIN", "HR_MANAGER"),
+  async (req, res) => {
+    const client = await pool.connect();
+
+    try {
+      const { employeeId } = req.params;
+
+      const uuidPattern =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+      if (!uuidPattern.test(employeeId)) {
+        return res.status(400).json({
+          status: "error",
+          message: "Invalid employee ID.",
+        });
+      }
+
+      const {
+        first_name,
+        last_name,
+        gender,
+        date_of_birth,
+        national_id,
+        personal_email,
+        phone,
+        address,
+        department_id,
+        position_id,
+        supervisor_id,
+        hire_date,
+        employment_type,
+        employment_status,
+        base_salary,
+      } = req.body;
+
+      if (
+        typeof first_name !== "string" ||
+        !first_name.trim() ||
+        typeof last_name !== "string" ||
+        !last_name.trim() ||
+        typeof hire_date !== "string" ||
+        !hire_date.trim()
+      ) {
+        return res.status(400).json({
+          status: "error",
+          message: "First name, last name and hire date are required.",
+        });
+      }
+
+      if (
+        base_salary !== null &&
+        base_salary !== undefined &&
+        (!Number.isFinite(Number(base_salary)) || Number(base_salary) < 0)
+      ) {
+        return res.status(400).json({
+          status: "error",
+          message: "Invalid base salary.",
+        });
+      }
+
+      // Validate department assignment.
+      if (department_id) {
+        const departmentCheck = await client.query(
+          `SELECT id FROM departments WHERE id = $1`,
+          [department_id],
+        );
+
+        if (departmentCheck.rowCount === 0) {
+          return res.status(400).json({
+            status: "error",
+            message: "Selected department does not exist.",
+          });
+        }
+      }
+
+      // Validate that the position belongs to the selected department.
+      if (position_id) {
+        if (!department_id) {
+          return res.status(400).json({
+            status: "error",
+            message: "A department must be selected for this position.",
+          });
+        }
+
+        const positionCheck = await client.query(
+          `SELECT id FROM positions
+     WHERE id = $1 AND department_id = $2`,
+          [position_id, department_id],
+        );
+
+        if (positionCheck.rowCount === 0) {
+          return res.status(400).json({
+            status: "error",
+            message:
+              "Selected position does not belong to the selected department.",
+          });
+        }
+      }
+
+      // Validate supervisor assignment.
+      if (supervisor_id) {
+        if (supervisor_id === employeeId) {
+          return res.status(400).json({
+            status: "error",
+            message: "An employee cannot be their own supervisor.",
+          });
+        }
+
+        const supervisorCheck = await client.query(
+          `SELECT id FROM employees WHERE id = $1`,
+          [supervisor_id],
+        );
+
+        if (supervisorCheck.rowCount === 0) {
+          return res.status(400).json({
+            status: "error",
+            message: "Selected supervisor does not exist.",
+          });
+        }
+      }
+
+      const result = await client.query(
+        `UPDATE employees
+         SET
+           first_name = $1,
+           last_name = $2,
+           gender = $3,
+           date_of_birth = $4,
+           national_id = $5,
+           personal_email = $6,
+           phone = $7,
+           address = $8,
+           department_id = $9,
+           position_id = $10,
+           supervisor_id = $11,
+           hire_date = $12,
+           employment_type = $13,
+           employment_status = $14,
+           base_salary = $15,
+           updated_at = NOW()
+         WHERE id = $16
+         RETURNING *`,
+        [
+          first_name.trim(),
+          last_name.trim(),
+          gender || null,
+          date_of_birth || null,
+          national_id || null,
+          personal_email || null,
+          phone || null,
+          address || null,
+          department_id || null,
+          position_id || null,
+          supervisor_id || null,
+          hire_date,
+          employment_type || null,
+          employment_status || null,
+          base_salary ?? null,
+          employeeId,
+        ],
+      );
+
+      if (result.rowCount === 0) {
+        return res.status(404).json({
+          status: "error",
+          message: "Employee not found.",
+        });
+      }
+
+      return res.json({
+        status: "success",
+        message: "Employee profile updated successfully.",
+        employee: result.rows[0],
+      });
+    } catch (error) {
+      console.error("Employee profile update error:", error);
+
+      return res.status(500).json({
+        status: "error",
+        message: "Unable to update employee profile.",
+      });
+    } finally {
+      client.release();
+    }
+  },
+);
+
 export default router;

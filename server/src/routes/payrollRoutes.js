@@ -2971,7 +2971,7 @@ router.get(
            e.employee_number,
            e.first_name,
            e.last_name,
-          e.email,
+          e.personal_email,
 d.department_name,
 pp.period_name,
            pp.start_date,

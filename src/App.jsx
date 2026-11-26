@@ -34,6 +34,8 @@ import {
   Download,
   MoreHorizontal,
   HeartPulse,
+  TrendingDown,
+  Banknote,
 } from "lucide-react";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
@@ -218,44 +220,6 @@ const menus = {
   ],
 };
 
-const employees = [
-  {
-    name: "Dr James Mwangi",
-    role: "Medical Officer",
-    dept: "Outpatient",
-    status: "On duty",
-    initials: "JM",
-  },
-  {
-    name: "Mary Wanjiku",
-    role: "Registered Nurse",
-    dept: "Maternity",
-    status: "On leave",
-    initials: "MW",
-  },
-  {
-    name: "Peter Otieno",
-    role: "Lab Technologist",
-    dept: "Laboratory",
-    status: "On duty",
-    initials: "PO",
-  },
-  {
-    name: "Grace Njeri",
-    role: "HR Officer",
-    dept: "Human Resources",
-    status: "On duty",
-    initials: "GN",
-  },
-  {
-    name: "David Kiptoo",
-    role: "Pharmacist",
-    dept: "Pharmacy",
-    status: "Off shift",
-    initials: "DK",
-  },
-];
-
 const attendance = [
   ["Mon, 09 Nov 2026", "07:02 AM", "07:08 PM", "12h 06m", "Present"],
   ["Tue, 10 Nov 2026", "06:56 AM", "07:01 PM", "12h 05m", "Present"],
@@ -409,6 +373,10 @@ function HospitalApp({ user, token, allowedPortals, onLogout }) {
 
   // Administrator Payroll State
   const [adminPayrollPeriods, setAdminPayrollPeriods] = useState([]);
+  const [payrollPeriodName, setPayrollPeriodName] = useState("");
+  const [payrollPeriodStartDate, setPayrollPeriodStartDate] = useState("");
+  const [payrollPeriodEndDate, setPayrollPeriodEndDate] = useState("");
+  const [payrollPeriodPaymentDate, setPayrollPeriodPaymentDate] = useState("");
   const [adminPayrollEmployees, setAdminPayrollEmployees] = useState([]);
   const [adminPayrollEmployeesLoading, setAdminPayrollEmployeesLoading] =
     useState(false);
@@ -416,6 +384,17 @@ function HospitalApp({ user, token, allowedPortals, onLogout }) {
     useState("");
   const [selectedPayrollEmployee, setSelectedPayrollEmployee] = useState("");
   const [payrollGenerating, setPayrollGenerating] = useState(false);
+  const [payrollPeriodCreating, setPayrollPeriodCreating] = useState(false);
+  const [payrollCalculating, setPayrollCalculating] = useState(false);
+  const [payrollItemSubmitting, setPayrollItemSubmitting] = useState(false);
+  const [payrollItemDeleting, setPayrollItemDeleting] = useState(false);
+  const [payrollApproving, setPayrollApproving] = useState(false);
+  const [payrollPeriodApproving, setPayrollPeriodApproving] = useState(false);
+  const [payrollPaymentReference, setPayrollPaymentReference] = useState("");
+  const [payrollPaymentDate, setPayrollPaymentDate] = useState("");
+  const [payrollPaymentSubmitting, setPayrollPaymentSubmitting] =
+    useState(false);
+  const [payrollPeriodClosing, setPayrollPeriodClosing] = useState(false);
   const [adminPayrollLoading, setAdminPayrollLoading] = useState(false);
   const [adminPayrollError, setAdminPayrollError] = useState("");
   const [selectedPayrollPeriod, setSelectedPayrollPeriod] = useState("");
@@ -456,6 +435,77 @@ function HospitalApp({ user, token, allowedPortals, onLogout }) {
     }
   }
 
+  async function createAdminPayrollPeriod() {
+    if (!token || payrollPeriodCreating) return;
+
+    if (
+      !payrollPeriodName.trim() ||
+      !payrollPeriodStartDate ||
+      !payrollPeriodEndDate
+    ) {
+      notify("Please provide a period name, start date and end date.");
+      return;
+    }
+
+    if (payrollPeriodEndDate < payrollPeriodStartDate) {
+      notify("The end date cannot be before the start date.");
+      return;
+    }
+
+    if (
+      payrollPeriodPaymentDate &&
+      payrollPeriodPaymentDate < payrollPeriodEndDate
+    ) {
+      notify("The payment date cannot be before the period end date.");
+      return;
+    }
+
+    setPayrollPeriodCreating(true);
+
+    try {
+      console.log("Payroll period dates being submitted:", {
+        start_date: payrollPeriodStartDate,
+        end_date: payrollPeriodEndDate,
+      });
+      const response = await fetch(`${API_BASE_URL}/api/payroll/periods`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          period_name: payrollPeriodName.trim(),
+          start_date: payrollPeriodStartDate,
+          end_date: payrollPeriodEndDate,
+          payment_date: payrollPeriodPaymentDate || null,
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.message || "Unable to create payroll period.");
+      }
+
+      notify(data.message || "Payroll period created successfully.");
+
+      setPayrollPeriodName("");
+      setPayrollPeriodStartDate("");
+      setPayrollPeriodEndDate("");
+      setPayrollPeriodPaymentDate("");
+
+      await loadAdminPayrollPeriods();
+
+      if (data.period?.id) {
+        setSelectedPayrollPeriod(data.period.id);
+      }
+    } catch (error) {
+      notify(error.message);
+    } finally {
+      setPayrollPeriodCreating(false);
+    }
+  }
+
   async function loadAdminPayrollPeriods() {
     if (!token) return;
 
@@ -477,9 +527,433 @@ function HospitalApp({ user, token, allowedPortals, onLogout }) {
 
       setAdminPayrollPeriods(data.periods || []);
     } catch (error) {
+      setAdminPayrollPeriods([]);
       setAdminPayrollError(error.message);
     } finally {
       setAdminPayrollLoading(false);
+    }
+  }
+
+  async function loadAdminPayrollEmployees() {
+    if (!token) return;
+
+    setAdminPayrollEmployeesLoading(true);
+    setAdminPayrollEmployeesError("");
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/payroll/employees`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(
+          data.message || "Unable to retrieve payroll employees.",
+        );
+      }
+
+      setAdminPayrollEmployees(data.employees || []);
+    } catch (error) {
+      setAdminPayrollEmployees([]);
+      setAdminPayrollEmployeesError(error.message);
+    } finally {
+      setAdminPayrollEmployeesLoading(false);
+    }
+  }
+
+  async function generatePayrollRecord() {
+    if (payrollGenerating) return;
+    if (!selectedPayrollEmployee || !selectedPayrollPeriod) {
+      notify("Please select an employee and payroll period.");
+      return;
+    }
+
+    const employee = adminPayrollEmployees.find(
+      (item) => item.id === selectedPayrollEmployee,
+    );
+
+    if (!employee) {
+      notify("Selected employee could not be found.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Generate payroll for ${employee.first_name} ${employee.last_name} (${employee.employee_number})?`,
+    );
+
+    if (!confirmed) return;
+
+    setPayrollGenerating(true);
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/payroll/records/generate`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            employee_id: selectedPayrollEmployee,
+            payroll_period_id: selectedPayrollPeriod,
+          }),
+        },
+      );
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.message || "Unable to generate payroll record.");
+      }
+
+      notify(data.message || "Payroll record generated successfully.");
+
+      setSelectedPayrollEmployee("");
+
+      await loadAdminPayrollRecords(selectedPayrollPeriod);
+      await loadAdminPayrollPeriods();
+    } catch (error) {
+      notify(error.message);
+    } finally {
+      setPayrollGenerating(false);
+    }
+  }
+
+  async function calculatePayrollRecord(recordId) {
+    if (!token || !recordId) return;
+
+    const confirmed = window.confirm(
+      "Are you sure you want to calculate this employee's payroll?",
+    );
+
+    if (!confirmed) return;
+
+    setPayrollCalculating(true);
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/payroll/records/${encodeURIComponent(recordId)}/calculate`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.message || "Unable to calculate payroll.");
+      }
+
+      notify(data.message || "Payroll calculated successfully.");
+
+      await loadAdminPayrollRecords(selectedPayrollPeriod);
+      await loadAdminPayrollPeriods();
+    } catch (error) {
+      notify(error.message);
+    } finally {
+      setPayrollCalculating(false);
+    }
+  }
+
+  async function addPayrollItem(recordId, item) {
+    if (!token || !recordId) return false;
+
+    setPayrollItemSubmitting(true);
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/payroll/records/${encodeURIComponent(recordId)}/items`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(item),
+        },
+      );
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.message || "Unable to add payroll item.");
+      }
+
+      notify(data.message || "Payroll item added successfully.");
+
+      await loadAdminPayrollRecords(selectedPayrollPeriod);
+      return true;
+    } catch (error) {
+      notify(error.message);
+      return false;
+    } finally {
+      setPayrollItemSubmitting(false);
+    }
+  }
+
+  async function deletePayrollItem(recordId, itemId) {
+    if (!token || !recordId || !itemId) return;
+
+    const confirmed = window.confirm(
+      "Are you sure you want to remove this payroll adjustment?",
+    );
+
+    if (!confirmed) return;
+
+    setPayrollItemDeleting(true);
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/payroll/records/${encodeURIComponent(recordId)}/items/${encodeURIComponent(itemId)}`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.message || "Unable to remove payroll adjustment.");
+      }
+
+      notify(data.message || "Payroll adjustment removed successfully.");
+
+      await loadAdminPayrollRecords(selectedPayrollPeriod);
+    } catch (error) {
+      notify(error.message);
+    } finally {
+      setPayrollItemDeleting(false);
+    }
+  }
+
+  async function approvePayrollRecord(recordId) {
+    if (!token || !recordId) return;
+
+    const confirmed = window.confirm(
+      "Are you sure you want to approve this employee's payroll record?",
+    );
+
+    if (!confirmed) return;
+
+    setPayrollApproving(true);
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/payroll/records/${encodeURIComponent(recordId)}/approve`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.message || "Unable to approve payroll record.");
+      }
+
+      notify(data.message || "Payroll record approved successfully.");
+
+      await loadAdminPayrollRecords(selectedPayrollPeriod);
+      await loadAdminPayrollPeriods();
+    } catch (error) {
+      notify(error.message);
+    } finally {
+      setPayrollApproving(false);
+    }
+  }
+
+  async function approvePayrollPeriod(periodId) {
+    if (!token || !periodId) return;
+
+    const confirmed = window.confirm(
+      "Are you sure you want to approve all payroll records in this period?",
+    );
+
+    if (!confirmed) return;
+
+    setPayrollPeriodApproving(true);
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/payroll/periods/${encodeURIComponent(periodId)}/approve`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.message || "Unable to approve payroll period.");
+      }
+
+      notify(data.message || "Payroll period approved successfully.");
+
+      await loadAdminPayrollRecords(periodId);
+      await loadAdminPayrollPeriods();
+    } catch (error) {
+      notify(error.message);
+    } finally {
+      setPayrollPeriodApproving(false);
+    }
+  }
+
+  async function payPayrollRecord(recordId) {
+    if (!token || !recordId || payrollPaymentSubmitting) return;
+
+    if (!payrollPaymentReference.trim() || !payrollPaymentDate) {
+      notify("Please provide a payment reference and payment date.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Are you sure you want to mark this employee's payroll as paid?",
+    );
+
+    if (!confirmed) return;
+
+    setPayrollPaymentSubmitting(true);
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/payroll/records/${encodeURIComponent(recordId)}/pay`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            payment_reference: payrollPaymentReference.trim(),
+            payment_date: payrollPaymentDate,
+          }),
+        },
+      );
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.message || "Unable to process payroll payment.");
+      }
+
+      notify(data.message || "Payroll record marked as paid.");
+
+      setPayrollPaymentReference("");
+
+      await loadAdminPayrollRecords(selectedPayrollPeriod);
+      await loadAdminPayrollPeriods();
+    } catch (error) {
+      notify(error.message);
+    } finally {
+      setPayrollPaymentSubmitting(false);
+    }
+  }
+
+  async function payPayrollPeriod(periodId) {
+    if (!token || !periodId || payrollPaymentSubmitting) return;
+
+    if (!payrollPaymentReference.trim() || !payrollPaymentDate) {
+      notify("Please provide a batch payment reference and payment date.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Are you sure you want to pay all outstanding approved records in this payroll period?",
+    );
+
+    if (!confirmed) return;
+
+    setPayrollPaymentSubmitting(true);
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/payroll/periods/${encodeURIComponent(periodId)}/pay`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            payment_reference: payrollPaymentReference.trim(),
+            payment_date: payrollPaymentDate,
+          }),
+        },
+      );
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(
+          data.message || "Unable to process bulk payroll payment.",
+        );
+      }
+
+      notify(data.message || "Payroll period payments processed successfully.");
+
+      setPayrollPaymentReference("");
+
+      await loadAdminPayrollRecords(periodId);
+      await loadAdminPayrollPeriods();
+    } catch (error) {
+      notify(error.message);
+    } finally {
+      setPayrollPaymentSubmitting(false);
+    }
+  }
+
+  async function closePayrollPeriod(periodId) {
+    if (!token || !periodId) return;
+
+    const confirmed = window.confirm(
+      "Are you sure you want to close this payroll period? This action should only be performed after all employees have been paid.",
+    );
+
+    if (!confirmed) return;
+
+    setPayrollPeriodClosing(true);
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/payroll/periods/${encodeURIComponent(periodId)}/close`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.message || "Unable to close payroll period.");
+      }
+
+      notify(data.message || "Payroll period closed successfully.");
+
+      await loadAdminPayrollRecords(periodId);
+      await loadAdminPayrollPeriods();
+    } catch (error) {
+      notify(error.message);
+    } finally {
+      setPayrollPeriodClosing(false);
     }
   }
 
@@ -765,6 +1239,12 @@ function HospitalApp({ user, token, allowedPortals, onLogout }) {
   }, [portal, page, token]);
 
   useEffect(() => {
+    if (portal === "Administrator" && page === "Payroll") {
+      loadAdminPayrollEmployees();
+    }
+  }, [portal, page, token]);
+
+  useEffect(() => {
     if (
       portal === "Administrator" &&
       page === "Payroll" &&
@@ -773,6 +1253,8 @@ function HospitalApp({ user, token, allowedPortals, onLogout }) {
       loadAdminPayrollRecords(selectedPayrollPeriod);
     } else {
       setAdminPayrollRecords([]);
+      setAdminPayrollSummary(null);
+      setAdminPayrollPeriodDetails(null);
     }
   }, [portal, page, selectedPayrollPeriod, token]);
 
@@ -825,13 +1307,11 @@ function HospitalApp({ user, token, allowedPortals, onLogout }) {
     <div className="app-shell">
       <aside className={`sidebar ${mobileOpen ? "sidebar-open" : ""}`}>
         <div className="brand">
-          <div className="brand-mark">
-            <Stethoscope size={23} />
-          </div>
-          <div>
-            <strong>ST TERESA</strong>
-            <span>HOSPITAL HRMS</span>
-          </div>
+          <img
+            src="/st-teresa-logo.png"
+            alt="St Teresa Hospital"
+            className="brand-logo"
+          />
           <button
             className="mobile-close icon-btn"
             onClick={() => setMobileOpen(false)}
@@ -1022,9 +1502,45 @@ function HospitalApp({ user, token, allowedPortals, onLogout }) {
               adminPayrollRecords={adminPayrollRecords}
               adminPayrollSummary={adminPayrollSummary}
               adminPayrollPeriodDetails={adminPayrollPeriodDetails}
+              adminPayrollEmployees={adminPayrollEmployees}
+              adminPayrollEmployeesLoading={adminPayrollEmployeesLoading}
+              adminPayrollEmployeesError={adminPayrollEmployeesError}
+              selectedPayrollEmployee={selectedPayrollEmployee}
+              setSelectedPayrollEmployee={setSelectedPayrollEmployee}
+              payrollGenerating={payrollGenerating}
+              payrollCalculating={payrollCalculating}
+              generatePayrollRecord={generatePayrollRecord}
+              calculatePayrollRecord={calculatePayrollRecord}
+              addPayrollItem={addPayrollItem}
+              payrollItemSubmitting={payrollItemSubmitting}
+              deletePayrollItem={deletePayrollItem}
+              payrollItemDeleting={payrollItemDeleting}
+              approvePayrollRecord={approvePayrollRecord}
+              payrollApproving={payrollApproving}
+              approvePayrollPeriod={approvePayrollPeriod}
+              payrollPeriodApproving={payrollPeriodApproving}
+              payrollPaymentReference={payrollPaymentReference}
+              setPayrollPaymentReference={setPayrollPaymentReference}
+              payrollPaymentDate={payrollPaymentDate}
+              setPayrollPaymentDate={setPayrollPaymentDate}
+              payrollPaymentSubmitting={payrollPaymentSubmitting}
+              payPayrollRecord={payPayrollRecord}
+              payPayrollPeriod={payPayrollPeriod}
+              payrollPeriodClosing={payrollPeriodClosing}
+              closePayrollPeriod={closePayrollPeriod}
               adminPayrollRecordsLoading={adminPayrollRecordsLoading}
               adminPayrollRecordsError={adminPayrollRecordsError}
               loadAdminPayrollRecords={loadAdminPayrollRecords}
+              createAdminPayrollPeriod={createAdminPayrollPeriod}
+              payrollPeriodCreating={payrollPeriodCreating}
+              payrollPeriodName={payrollPeriodName}
+              setPayrollPeriodName={setPayrollPeriodName}
+              payrollPeriodStartDate={payrollPeriodStartDate}
+              setPayrollPeriodStartDate={setPayrollPeriodStartDate}
+              payrollPeriodEndDate={payrollPeriodEndDate}
+              setPayrollPeriodEndDate={setPayrollPeriodEndDate}
+              payrollPeriodPaymentDate={payrollPeriodPaymentDate}
+              setPayrollPeriodPaymentDate={setPayrollPeriodPaymentDate}
             />
           )}
           {portal === "Employee" && (
@@ -1108,9 +1624,46 @@ function AdminPage({
   adminPayrollRecords,
   adminPayrollSummary,
   adminPayrollPeriodDetails,
+  adminPayrollEmployees,
+  adminPayrollEmployeesLoading,
+  adminPayrollEmployeesError,
+  selectedPayrollEmployee,
+  setSelectedPayrollEmployee,
+  payrollGenerating,
+  payrollCalculating,
+  generatePayrollRecord,
+  calculatePayrollRecord,
+  addPayrollItem,
+  payrollItemSubmitting,
+  deletePayrollItem,
+  payrollItemDeleting,
+  approvePayrollRecord,
+  payrollApproving,
+  approvePayrollPeriod,
+  payrollPeriodApproving,
+  payrollPaymentReference,
+  setPayrollPaymentReference,
+  payrollPaymentDate,
+  setPayrollPaymentDate,
+  payrollPaymentSubmitting,
+  payPayrollRecord,
+  payPayrollPeriod,
+  payrollPeriodClosing,
+  closePayrollPeriod,
   adminPayrollRecordsLoading,
   adminPayrollRecordsError,
   loadAdminPayrollRecords,
+  createAdminPayrollPeriod,
+  payrollPeriodCreating,
+  payrollPeriodName,
+  setPayrollPeriodName,
+  payrollPeriodStartDate,
+  setPayrollPeriodStartDate,
+  payrollPeriodEndDate,
+  setPayrollPeriodEndDate,
+  payrollPeriodPaymentDate,
+  setPayrollPeriodPaymentDate,
+
   adminAttendanceData,
   adminAttendanceLoading,
   adminAttendanceError,
@@ -1145,6 +1698,249 @@ function AdminPage({
   loadAdminShiftData,
   assignEmployeeShift,
 }) {
+  const [search, setSearch] = useState("");
+  const [employees, setEmployees] = useState([]);
+  const [employeesLoading, setEmployeesLoading] = useState(false);
+  const [employeesError, setEmployeesError] = useState("");
+  const [showEmployeeForm, setShowEmployeeForm] = useState(false);
+  const [employeeCreating, setEmployeeCreating] = useState(false);
+  const [createdEmployee, setCreatedEmployee] = useState(null);
+  const [newEmployeeDepartmentId, setNewEmployeeDepartmentId] = useState("");
+
+  const [selectedEmployee, setSelectedEmployee] = useState(null);
+  const [isEditingEmployee, setIsEditingEmployee] = useState(false);
+  const [employeeSaving, setEmployeeSaving] = useState(false);
+  const [employeeOptions, setEmployeeOptions] = useState({
+    departments: [],
+    positions: [],
+    supervisors: [],
+  });
+  const [editDepartmentId, setEditDepartmentId] = useState("");
+  const [editPositionId, setEditPositionId] = useState("");
+  const [employeeProfileLoading, setEmployeeProfileLoading] = useState(false);
+  const [employeeProfileError, setEmployeeProfileError] = useState("");
+
+  async function loadEmployees() {
+    if (!token) return;
+
+    setEmployeesLoading(true);
+    setEmployeesError("");
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/employees`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.message || "Unable to retrieve employees.");
+      }
+
+      setEmployees(Array.isArray(data.employees) ? data.employees : []);
+    } catch (error) {
+      setEmployeesError(error.message);
+    } finally {
+      setEmployeesLoading(false);
+    }
+  }
+
+  async function openEmployeeProfile(employeeId) {
+    if (!token || !employeeId) return;
+    loadEmployeeOptions();
+
+    setEmployeeProfileLoading(true);
+    setEmployeeProfileError("");
+    setSelectedEmployee(null);
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/employees/${employeeId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.message || "Unable to retrieve employee profile.");
+      }
+
+      setSelectedEmployee(data.employee);
+      setEditDepartmentId(data.employee.department_id || "");
+      setEditPositionId(data.employee.position_id || "");
+    } catch (error) {
+      setEmployeeProfileError(error.message);
+    } finally {
+      setEmployeeProfileLoading(false);
+    }
+  }
+
+  async function loadEmployeeOptions() {
+    if (!token) return;
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/employees/options`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.message || "Unable to load employee options.");
+      }
+
+      setEmployeeOptions({
+        departments: data.departments || [],
+        positions: data.positions || [],
+        supervisors: data.supervisors || [],
+      });
+    } catch (error) {
+      notify(error.message);
+    }
+  }
+
+  async function createEmployee(formData) {
+    if (!token) return;
+
+    setEmployeeCreating(true);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/employees`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(formData),
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.message || "Unable to create employee.");
+      }
+
+      setCreatedEmployee(data);
+      setShowEmployeeForm(false);
+      setNewEmployeeDepartmentId("");
+
+      await loadEmployees();
+
+      notify("Employee and login account created successfully.");
+    } catch (error) {
+      notify(error.message);
+    } finally {
+      setEmployeeCreating(false);
+    }
+  }
+
+  async function saveEmployeeProfile(updatedEmployee) {
+    if (!token || !selectedEmployee?.id) return;
+
+    setEmployeeSaving(true);
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/employees/${selectedEmployee.id}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(updatedEmployee),
+        },
+      );
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.message || "Unable to update employee profile.");
+      }
+
+      setSelectedEmployee(data.employee);
+      setIsEditingEmployee(false);
+      await loadEmployees();
+      notify("Employee profile updated successfully.");
+    } catch (error) {
+      notify(error.message);
+    } finally {
+      setEmployeeSaving(false);
+    }
+  }
+
+  useEffect(() => {
+    if (page === "Employees" && token) {
+      loadEmployees();
+    }
+  }, [page, token]);
+
+  const [payrollItemRecordId, setPayrollItemRecordId] = useState("");
+  const [payrollItemType, setPayrollItemType] = useState("EARNING");
+  const [payrollItemCode, setPayrollItemCode] = useState("");
+  const [payrollItemDescription, setPayrollItemDescription] = useState("");
+  const [payrollItemAmount, setPayrollItemAmount] = useState("");
+
+  const [payrollItemTaxable, setPayrollItemTaxable] = useState(true);
+  const [payrollItemPensionable, setPayrollItemPensionable] = useState(true);
+  const [payrollItemShifLiable, setPayrollItemShifLiable] = useState(true);
+  const [payrollItemHousingLevyLiable, setPayrollItemHousingLevyLiable] =
+    useState(true);
+
+  async function handleAddPayrollItem(event) {
+    event.preventDefault();
+
+    const amount = Number(payrollItemAmount);
+
+    if (
+      !payrollItemRecordId ||
+      !payrollItemCode.trim() ||
+      !payrollItemDescription.trim() ||
+      !Number.isFinite(amount) ||
+      amount <= 0 ||
+      Math.round(amount * 100) !== amount * 100
+    ) {
+      notify("Please provide a valid payroll item and amount.");
+      return;
+    }
+
+    const item = {
+      item_type: payrollItemType,
+      item_code: payrollItemCode.trim(),
+      description: payrollItemDescription.trim(),
+      amount,
+    };
+
+    if (payrollItemType === "EARNING") {
+      item.is_paye_taxable = payrollItemTaxable;
+      item.is_pensionable = payrollItemPensionable;
+      item.is_shif_liable = payrollItemShifLiable;
+      item.is_housing_levy_liable = payrollItemHousingLevyLiable;
+    }
+
+    const success = await addPayrollItem(payrollItemRecordId, item);
+
+    if (!success) return;
+
+    setPayrollItemRecordId("");
+    setPayrollItemType("EARNING");
+    setPayrollItemCode("");
+    setPayrollItemDescription("");
+    setPayrollItemAmount("");
+    setPayrollItemTaxable(true);
+    setPayrollItemPensionable(true);
+    setPayrollItemShifLiable(true);
+    setPayrollItemHousingLevyLiable(true);
+  }
+
   const [editingAttendance, setEditingAttendance] = React.useState(null);
 
   const [correctionForm, setCorrectionForm] = React.useState({
@@ -1246,12 +2042,459 @@ function AdminPage({
     }
   };
 
+  if (page === "Employees" && showEmployeeForm) {
+    return (
+      <>
+        <div className="section-toolbar">
+          <div>
+            <h2>Register new employee</h2>
+            <p>Create an employee profile and login account.</p>
+          </div>
+
+          <button
+            className="btn btn-light"
+            onClick={() => setShowEmployeeForm(false)}
+          >
+            Cancel
+          </button>
+        </div>
+
+        <div className="table-card" style={{ padding: 24 }}>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+
+              const formData = Object.fromEntries(
+                new FormData(event.currentTarget).entries(),
+              );
+
+              formData.base_salary =
+                formData.base_salary === "" ? 0 : Number(formData.base_salary);
+
+              createEmployee(formData);
+            }}
+          >
+            <h3>Personal information</h3>
+
+            <div className="form-grid">
+              <div>
+                <label>Employee number *</label>
+                <input name="employee_number" required />
+              </div>
+
+              <div>
+                <label>First name *</label>
+                <input name="first_name" required />
+              </div>
+
+              <div>
+                <label>Last name *</label>
+                <input name="last_name" required />
+              </div>
+
+              <div>
+                <label>Gender</label>
+                <select name="gender" defaultValue="">
+                  <option value="">Select gender</option>
+                  <option value="MALE">Male</option>
+                  <option value="FEMALE">Female</option>
+                  <option value="OTHER">Other</option>
+                </select>
+              </div>
+
+              <div>
+                <label>Date of birth</label>
+                <input type="date" name="date_of_birth" />
+              </div>
+
+              <div>
+                <label>National ID</label>
+                <input name="national_id" />
+              </div>
+
+              <div>
+                <label>Personal email *</label>
+                <input type="email" name="personal_email" required />
+              </div>
+
+              <div>
+                <label>Phone number</label>
+                <input name="phone" />
+              </div>
+            </div>
+
+            <label>Residential address</label>
+            <textarea name="address" rows="3" />
+
+            <h3 style={{ marginTop: 28 }}>Employment information</h3>
+
+            <div className="form-grid">
+              <div>
+                <label>Hire date *</label>
+                <input type="date" name="hire_date" required />
+              </div>
+
+              <div>
+                <label>Employment type</label>
+                <input name="employment_type" defaultValue="PERMANENT" />
+              </div>
+
+              <div>
+                <label>Employment status</label>
+                <input name="employment_status" defaultValue="ACTIVE" />
+              </div>
+
+              <div>
+                <label>Base salary (KSh)</label>
+                <input
+                  type="number"
+                  name="base_salary"
+                  min="0"
+                  step="0.01"
+                  defaultValue="0"
+                />
+              </div>
+
+              <div>
+                <label>Department</label>
+                <select
+                  name="department_id"
+                  value={newEmployeeDepartmentId}
+                  onChange={(event) =>
+                    setNewEmployeeDepartmentId(event.target.value)
+                  }
+                >
+                  <option value="">Select department</option>
+                  {employeeOptions.departments.map((department) => (
+                    <option key={department.id} value={department.id}>
+                      {department.department_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label>Position</label>
+                <select name="position_id" defaultValue="">
+                  <option value="">Select position</option>
+                  {employeeOptions.positions
+                    .filter(
+                      (position) =>
+                        position.department_id === newEmployeeDepartmentId,
+                    )
+                    .map((position) => (
+                      <option key={position.id} value={position.id}>
+                        {position.position_title}
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div>
+                <label>Supervisor</label>
+                <select name="supervisor_id" defaultValue="">
+                  <option value="">No supervisor</option>
+                  {employeeOptions.supervisors.map((supervisor) => (
+                    <option key={supervisor.id} value={supervisor.id}>
+                      {supervisor.first_name} {supervisor.last_name} (
+                      {supervisor.employee_number})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 10, marginTop: 28 }}>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={employeeCreating}
+              >
+                {employeeCreating ? "Creating employee..." : "Create employee"}
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-light"
+                onClick={() => setShowEmployeeForm(false)}
+                disabled={employeeCreating}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      </>
+    );
+  }
+
+  if (page === "Employees" && selectedEmployee) {
+    const e = selectedEmployee;
+
+    return (
+      <>
+        <div className="section-toolbar">
+          <div>
+            <h2>Employee profile</h2>
+            <p>View staff employment and personal details.</p>
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button
+              className="btn btn-primary"
+              onClick={() => setIsEditingEmployee(true)}
+            >
+              <UserPlus size={16} /> Edit profile
+            </button>
+
+            <button
+              className="btn btn-light"
+              onClick={() => {
+                setSelectedEmployee(null);
+                setIsEditingEmployee(false);
+              }}
+            >
+              Back to employees
+            </button>
+          </div>
+        </div>
+
+        {employeeProfileLoading ? (
+          <p className="empty-state">Loading employee profile...</p>
+        ) : (
+          <div className="table-card" style={{ padding: 24 }}>
+            {isEditingEmployee && (
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+
+                  const formData = new FormData(event.currentTarget);
+                  const updatedEmployee = Object.fromEntries(
+                    formData.entries(),
+                  );
+
+                  updatedEmployee.base_salary =
+                    updatedEmployee.base_salary === ""
+                      ? null
+                      : Number(updatedEmployee.base_salary);
+
+                  saveEmployeeProfile(updatedEmployee);
+                }}
+              >
+                <h3>Edit Employee Details</h3>
+
+                <label>Department</label>
+                <select
+                  name="department_id"
+                  value={editDepartmentId}
+                  onChange={(event) => {
+                    setEditDepartmentId(event.target.value);
+                    setEditPositionId("");
+                  }}
+                >
+                  <option value="">Select department</option>
+                  {employeeOptions.departments.map((department) => (
+                    <option key={department.id} value={department.id}>
+                      {department.department_name}
+                    </option>
+                  ))}
+                </select>
+
+                <label>Position</label>
+                <select
+                  name="position_id"
+                  value={editPositionId}
+                  onChange={(event) => setEditPositionId(event.target.value)}
+                >
+                  <option value="">Select position</option>
+                  {employeeOptions.positions
+                    .filter(
+                      (position) => position.department_id === editDepartmentId,
+                    )
+                    .map((position) => (
+                      <option key={position.id} value={position.id}>
+                        {position.position_title}
+                      </option>
+                    ))}
+                </select>
+
+                <label>Supervisor</label>
+                <select
+                  name="supervisor_id"
+                  defaultValue={e.supervisor_id || ""}
+                >
+                  <option value="">No supervisor</option>
+                  {employeeOptions.supervisors
+                    .filter((supervisor) => supervisor.id !== e.id)
+                    .map((supervisor) => (
+                      <option key={supervisor.id} value={supervisor.id}>
+                        {supervisor.first_name} {supervisor.last_name} (
+                        {supervisor.employee_number})
+                      </option>
+                    ))}
+                </select>
+
+                <label>First name</label>
+                <input
+                  name="first_name"
+                  defaultValue={e.first_name || ""}
+                  required
+                />
+
+                <label>Last name</label>
+                <input
+                  name="last_name"
+                  defaultValue={e.last_name || ""}
+                  required
+                />
+
+                <label>Gender</label>
+                <input name="gender" defaultValue={e.gender || ""} />
+
+                <label>Date of birth</label>
+                <input
+                  type="date"
+                  name="date_of_birth"
+                  defaultValue={
+                    e.date_of_birth ? String(e.date_of_birth).slice(0, 10) : ""
+                  }
+                />
+
+                <label>National ID</label>
+                <input name="national_id" defaultValue={e.national_id || ""} />
+
+                <label>Email</label>
+                <input
+                  type="email"
+                  name="personal_email"
+                  defaultValue={e.personal_email || ""}
+                />
+
+                <label>Phone</label>
+                <input name="phone" defaultValue={e.phone || ""} />
+
+                <label>Address</label>
+                <textarea name="address" defaultValue={e.address || ""} />
+
+                <label>Hire date</label>
+                <input
+                  type="date"
+                  name="hire_date"
+                  defaultValue={
+                    e.hire_date ? String(e.hire_date).slice(0, 10) : ""
+                  }
+                  required
+                />
+
+                <label>Employment type</label>
+                <input
+                  name="employment_type"
+                  defaultValue={e.employment_type || ""}
+                />
+
+                <label>Employment status</label>
+                <input
+                  name="employment_status"
+                  defaultValue={e.employment_status || ""}
+                />
+
+                <label>Base salary (KSh)</label>
+                <input
+                  type="number"
+                  name="base_salary"
+                  min="0"
+                  step="0.01"
+                  defaultValue={e.base_salary ?? ""}
+                />
+
+                <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    disabled={employeeSaving}
+                  >
+                    {employeeSaving ? "Saving..." : "Save changes"}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="btn btn-light"
+                    onClick={() => setIsEditingEmployee(false)}
+                    disabled={employeeSaving}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {!isEditingEmployee && (
+              <>
+                <h3>
+                  {e.first_name} {e.last_name}
+                </h3>
+                <p>
+                  <strong>Employee number:</strong> {e.employee_number}
+                </p>
+                <p>
+                  <strong>Department:</strong>{" "}
+                  {e.department_name || "Not assigned"}
+                </p>
+                <p>
+                  <strong>Position:</strong>{" "}
+                  {e.position_title || "Not assigned"}
+                </p>
+                <p>
+                  <strong>Supervisor:</strong>{" "}
+                  {e.supervisor_name || "Not assigned"}
+                </p>
+                <p>
+                  <strong>Email:</strong> {e.personal_email || "Not provided"}
+                </p>
+                <p>
+                  <strong>Phone:</strong> {e.phone || "Not provided"}
+                </p>
+                <p>
+                  <strong>Address:</strong> {e.address || "Not provided"}
+                </p>
+                <p>
+                  <strong>Gender:</strong> {e.gender || "Not provided"}
+                </p>
+                <p>
+                  <strong>Date of birth:</strong>{" "}
+                  {e.date_of_birth || "Not provided"}
+                </p>
+                <p>
+                  <strong>Hire date:</strong> {e.hire_date || "Not provided"}
+                </p>
+                <p>
+                  <strong>Employment type:</strong>{" "}
+                  {e.employment_type || "Not provided"}
+                </p>
+                <p>
+                  <strong>Employment status:</strong>{" "}
+                  {e.employment_status || "Not provided"}
+                </p>
+                <p>
+                  <strong>Base salary:</strong>{" "}
+                  {e.base_salary == null
+                    ? "Not provided"
+                    : `KSh ${Number(e.base_salary).toLocaleString()}`}
+                </p>
+              </>
+            )}
+          </div>
+        )}
+      </>
+    );
+  }
+
   if (page === "Employees") {
     const filtered = employees.filter((e) =>
-      `${e.name} ${e.role} ${e.dept}`
+      `${e.first_name} ${e.last_name} ${e.employee_number} ${e.position_title || ""} ${e.department_name || ""}`
         .toLowerCase()
         .includes(search.toLowerCase()),
     );
+
     return (
       <>
         <div className="section-toolbar">
@@ -1259,62 +2502,100 @@ function AdminPage({
             <h2>Employee directory</h2>
             <p>Manage hospital staff profiles and employment details.</p>
           </div>
-          <button className="btn btn-primary" onClick={onAdd}>
+          <button
+            className="btn btn-primary"
+            onClick={() => {
+              setCreatedEmployee(null);
+              setNewEmployeeDepartmentId("");
+              loadEmployeeOptions();
+              setShowEmployeeForm(true);
+            }}
+          >
             <UserPlus size={16} /> Add employee
           </button>
         </div>
+
         <div className="table-card">
           <div className="table-top">
             <strong>
-              All employees <span className="count-pill">263</span>
+              All employees{" "}
+              <span className="count-pill">{employees.length}</span>
             </strong>
             <button
               className="btn btn-light btn-sm"
-              onClick={() =>
-                notify("Filters are available in the full application.")
-              }
+              onClick={() => loadEmployees()}
+              disabled={employeesLoading}
             >
-              <Filter size={15} /> Filters
+              <Filter size={15} /> Refresh
             </button>
           </div>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>EMPLOYEE</th>
-                  <th>POSITION</th>
-                  <th>DEPARTMENT</th>
-                  <th>STATUS</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((e) => (
-                  <tr key={e.name}>
-                    <td>
-                      <div className="person-cell">
-                        <div className="avatar">{e.initials}</div>
-                        <strong>{e.name}</strong>
-                      </div>
-                    </td>
-                    <td>{e.role}</td>
-                    <td>{e.dept}</td>
-                    <td>
-                      <Status value={e.status} />
-                    </td>
-                    <td>
-                      <button
-                        className="icon-btn"
-                        onClick={() => notify(`${e.name} profile preview`)}
-                      >
-                        <MoreHorizontal size={18} />
-                      </button>
-                    </td>
+
+          {employeesLoading ? (
+            <p className="empty-state">Loading employees...</p>
+          ) : employeesError ? (
+            <p className="empty-state">{employeesError}</p>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>EMPLOYEE</th>
+                    <th>POSITION</th>
+                    <th>DEPARTMENT</th>
+                    <th>STATUS</th>
+                    <th></th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {filtered.length === 0 ? (
+                    <tr>
+                      <td colSpan="5">
+                        {employees.length === 0
+                          ? "No employees found."
+                          : "No employees match your search."}
+                      </td>
+                    </tr>
+                  ) : (
+                    filtered.map((e) => {
+                      const name = `${e.first_name} ${e.last_name}`;
+                      const initials =
+                        `${e.first_name?.[0] || ""}${e.last_name?.[0] || ""}`.toUpperCase();
+
+                      return (
+                        <tr key={e.id}>
+                          <td>
+                            <div className="person-cell">
+                              <div className="avatar">{initials}</div>
+                              <button
+                                className="btn btn-light btn-sm"
+                                onClick={() => openEmployeeProfile(e.id)}
+                              >
+                                {name}
+                              </button>
+                            </div>
+                          </td>
+                          <td>{e.position_title || "Not assigned"}</td>
+                          <td>{e.department_name || "Not assigned"}</td>
+                          <td>
+                            <Status value={e.employment_status || "UNKNOWN"} />
+                          </td>
+                          <td>
+                            <button
+                              className="icon-btn"
+                              onClick={() => openEmployeeProfile(e.id)}
+                              title="View employee profile"
+                            >
+                              <MoreHorizontal size={18} />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </>
     );
@@ -1972,6 +3253,18 @@ function AdminPage({
   if (page === "Payroll") {
     const summary = adminPayrollSummary || {};
 
+    const selectedPeriod = adminPayrollPeriods.find(
+      (period) => period.id === selectedPayrollPeriod,
+    );
+
+    const existingPayrollEmployeeIds = new Set(
+      adminPayrollRecords.map((record) => record.employee_id),
+    );
+
+    const availablePayrollEmployees = adminPayrollEmployees.filter(
+      (employee) => !existingPayrollEmployeeIds.has(employee.id),
+    );
+
     const formatPayrollMoney = (amount) =>
       `KSh ${Number(amount || 0).toLocaleString("en-KE", {
         minimumFractionDigits: 2,
@@ -1984,10 +3277,84 @@ function AdminPage({
           title="Payroll Management"
           action="Refresh"
           onAction={loadAdminPayrollPeriods}
+          actionDisabled={adminPayrollLoading}
         >
           {adminPayrollError && (
             <div className="alert alert-error">{adminPayrollError}</div>
           )}
+
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              createAdminPayrollPeriod();
+            }}
+            style={{ maxWidth: "420px", marginBottom: "20px" }}
+          >
+            <div className="form-group">
+              <label>Payroll Period Name</label>
+              <input
+                type="text"
+                value={payrollPeriodName}
+                onChange={(event) => setPayrollPeriodName(event.target.value)}
+                maxLength={100}
+                placeholder="e.g. November 2026"
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label>Start Date</label>
+              <input
+                type="date"
+                value={payrollPeriodStartDate}
+                onChange={(event) =>
+                  setPayrollPeriodStartDate(event.target.value)
+                }
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label>End Date</label>
+              <input
+                type="date"
+                value={payrollPeriodEndDate}
+                min={payrollPeriodStartDate || undefined}
+                onChange={(event) =>
+                  setPayrollPeriodEndDate(event.target.value)
+                }
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label>Payment Date (Optional)</label>
+              <input
+                type="date"
+                value={payrollPeriodPaymentDate}
+                min={payrollPeriodEndDate || undefined}
+                onChange={(event) =>
+                  setPayrollPeriodPaymentDate(event.target.value)
+                }
+              />
+            </div>
+
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={
+                payrollPeriodCreating ||
+                adminPayrollLoading ||
+                !payrollPeriodName.trim() ||
+                !payrollPeriodStartDate ||
+                !payrollPeriodEndDate
+              }
+            >
+              {payrollPeriodCreating
+                ? "Creating Period..."
+                : "Create Payroll Period"}
+            </button>
+          </form>
 
           {adminPayrollLoading ? (
             <p>Loading payroll periods...</p>
@@ -2000,6 +3367,7 @@ function AdminPage({
               <label>Select payroll period</label>
               <select
                 value={selectedPayrollPeriod}
+                disabled={adminPayrollRecordsLoading}
                 onChange={(e) => setSelectedPayrollPeriod(e.target.value)}
                 style={{ width: "100%", padding: "10px" }}
               >
@@ -2016,6 +3384,124 @@ function AdminPage({
 
         {selectedPayrollPeriod && (
           <>
+            {selectedPeriod?.period_status === "OPEN" && (
+              <Panel title="Generate Employee Payroll">
+                {adminPayrollEmployeesError && (
+                  <div className="alert alert-error">
+                    {adminPayrollEmployeesError}
+                  </div>
+                )}
+
+                {adminPayrollEmployeesLoading ? (
+                  <p>Loading active employees...</p>
+                ) : adminPayrollEmployees.length === 0 ? (
+                  <p>No active employees available for payroll.</p>
+                ) : availablePayrollEmployees.length === 0 ? (
+                  <p>
+                    All active employees already have payroll records for this
+                    period.
+                  </p>
+                ) : (
+                  <div style={{ maxWidth: "500px" }}>
+                    <label>Select employee</label>
+
+                    <select
+                      value={selectedPayrollEmployee}
+                      disabled={payrollGenerating || adminPayrollRecordsLoading}
+                      onChange={(e) =>
+                        setSelectedPayrollEmployee(e.target.value)
+                      }
+                      style={{
+                        width: "100%",
+                        padding: "10px",
+                        marginBottom: "15px",
+                      }}
+                    >
+                      <option value="">Choose an employee</option>
+
+                      {availablePayrollEmployees.map((employee) => (
+                        <option key={employee.id} value={employee.id}>
+                          {employee.first_name} {employee.last_name} —{" "}
+                          {employee.employee_number}
+                        </option>
+                      ))}
+                    </select>
+
+                    <button
+                      className="btn btn-primary"
+                      onClick={generatePayrollRecord}
+                      disabled={
+                        !selectedPayrollEmployee ||
+                        payrollGenerating ||
+                        adminPayrollRecordsLoading
+                      }
+                    >
+                      {payrollGenerating ? "Generating..." : "Generate Payroll"}
+                    </button>
+                  </div>
+                )}
+              </Panel>
+            )}
+
+            {adminPayrollPeriodDetails?.period_status === "APPROVED" &&
+              adminPayrollRecords.some(
+                (record) => record.payment_status === "APPROVED",
+              ) && (
+                <Panel title="Process Payroll Payments">
+                  <form
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      payPayrollPeriod(selectedPayrollPeriod);
+                    }}
+                  >
+                    <div className="form-group">
+                      <label>Batch Payment Reference</label>
+                      <input
+                        type="text"
+                        value={payrollPaymentReference}
+                        onChange={(event) =>
+                          setPayrollPaymentReference(event.target.value)
+                        }
+                        maxLength={100}
+                        placeholder="Enter bank or transaction reference"
+                        required
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label>Payment Date</label>
+                      <input
+                        type="date"
+                        value={payrollPaymentDate}
+                        onChange={(event) =>
+                          setPayrollPaymentDate(event.target.value)
+                        }
+                        min={adminPayrollPeriodDetails.end_date?.slice(0, 10)}
+                        required
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      className="btn btn-primary"
+                      disabled={
+                        payrollPaymentSubmitting ||
+                        adminPayrollRecordsLoading ||
+                        !payrollPaymentReference.trim() ||
+                        !payrollPaymentDate ||
+                        !adminPayrollRecords.some(
+                          (record) => record.payment_status === "APPROVED",
+                        )
+                      }
+                    >
+                      {payrollPaymentSubmitting
+                        ? "Processing Payments..."
+                        : "Pay All Outstanding Records"}
+                    </button>
+                  </form>
+                </Panel>
+              )}
+
             <Stats
               items={[
                 [
@@ -2073,16 +3559,193 @@ function AdminPage({
                     <strong>Status:</strong>{" "}
                     {adminPayrollPeriodDetails.period_status}
                   </p>
+                  {adminPayrollPeriodDetails.period_status === "OPEN" &&
+                    adminPayrollRecords.length > 0 && (
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        style={{ marginTop: "15px" }}
+                        disabled={
+                          payrollPeriodApproving ||
+                          adminPayrollRecordsLoading ||
+                          adminPayrollRecords.length === 0
+                        }
+                        onClick={() =>
+                          approvePayrollPeriod(selectedPayrollPeriod)
+                        }
+                      >
+                        {payrollPeriodApproving
+                          ? "Approving Period..."
+                          : "Approve Entire Payroll Period"}
+                      </button>
+                    )}
+
+                  {adminPayrollPeriodDetails.period_status === "PAID" && (
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      style={{ marginTop: "15px", marginLeft: "8px" }}
+                      disabled={
+                        payrollPeriodClosing || adminPayrollRecordsLoading
+                      }
+                      onClick={() => closePayrollPeriod(selectedPayrollPeriod)}
+                    >
+                      {payrollPeriodClosing
+                        ? "Closing Period..."
+                        : "Close Payroll Period"}
+                    </button>
+                  )}
                 </div>
               ) : (
                 <p>Select a payroll period to view its details.</p>
               )}
             </Panel>
 
+            {adminPayrollPeriodDetails?.period_status === "OPEN" && (
+              <Panel title="Add Manual Payroll Adjustment">
+                <form onSubmit={handleAddPayrollItem}>
+                  <div className="form-group">
+                    <label>Select pending employee record</label>
+                    <select
+                      value={payrollItemRecordId}
+                      onChange={(e) => setPayrollItemRecordId(e.target.value)}
+                      required
+                    >
+                      <option value="">Choose employee</option>
+
+                      {adminPayrollRecords
+                        .filter((record) => record.payment_status === "PENDING")
+                        .map((record) => (
+                          <option key={record.id} value={record.id}>
+                            {record.first_name} {record.last_name} —{" "}
+                            {record.employee_number}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+
+                  <div className="form-group">
+                    <label>Adjustment type</label>
+                    <select
+                      value={payrollItemType}
+                      onChange={(e) => setPayrollItemType(e.target.value)}
+                    >
+                      <option value="EARNING">Earning</option>
+                      <option value="DEDUCTION">Deduction</option>
+                    </select>
+                  </div>
+
+                  <div className="form-group">
+                    <label>Item code</label>
+                    <input
+                      type="text"
+                      value={payrollItemCode}
+                      onChange={(e) => setPayrollItemCode(e.target.value)}
+                      maxLength={50}
+                      placeholder="e.g. TRANSPORT_ALLOWANCE"
+                      required
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label>Description</label>
+                    <input
+                      type="text"
+                      value={payrollItemDescription}
+                      onChange={(e) =>
+                        setPayrollItemDescription(e.target.value)
+                      }
+                      maxLength={150}
+                      placeholder="Enter adjustment description"
+                      required
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label>Amount (KSh)</label>
+                    <input
+                      type="number"
+                      value={payrollItemAmount}
+                      onChange={(e) => setPayrollItemAmount(e.target.value)}
+                      min="0.01"
+                      step="0.01"
+                      placeholder="0.00"
+                      required
+                    />
+                  </div>
+
+                  {payrollItemType === "EARNING" && (
+                    <div style={{ marginBottom: "15px" }}>
+                      <strong>Statutory treatment</strong>
+
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={payrollItemTaxable}
+                          onChange={(e) =>
+                            setPayrollItemTaxable(e.target.checked)
+                          }
+                        />
+                        PAYE taxable
+                      </label>
+
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={payrollItemPensionable}
+                          onChange={(e) =>
+                            setPayrollItemPensionable(e.target.checked)
+                          }
+                        />
+                        Pensionable
+                      </label>
+
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={payrollItemShifLiable}
+                          onChange={(e) =>
+                            setPayrollItemShifLiable(e.target.checked)
+                          }
+                        />
+                        SHIF liable
+                      </label>
+
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={payrollItemHousingLevyLiable}
+                          onChange={(e) =>
+                            setPayrollItemHousingLevyLiable(e.target.checked)
+                          }
+                        />
+                        Housing levy liable
+                      </label>
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    disabled={
+                      payrollItemSubmitting ||
+                      adminPayrollRecordsLoading ||
+                      !payrollItemRecordId
+                    }
+                  >
+                    {payrollItemSubmitting ? "Adding..." : "Add Adjustment"}
+                  </button>
+                </form>
+              </Panel>
+            )}
+
             <Panel
               title="Employee payroll records"
               action="Refresh records"
               onAction={() => loadAdminPayrollRecords(selectedPayrollPeriod)}
+              actionDisabled={
+                !selectedPayrollPeriod || adminPayrollRecordsLoading
+              }
             >
               {adminPayrollRecordsError && (
                 <div className="alert alert-error">
@@ -2106,6 +3769,7 @@ function AdminPage({
                         <th>DEDUCTIONS</th>
                         <th>NET SALARY</th>
                         <th>PAYMENT STATUS</th>
+                        <th>ACTIONS</th>
                       </tr>
                     </thead>
 
@@ -2136,6 +3800,111 @@ function AdminPage({
 
                           <td>
                             <strong>{record.payment_status}</strong>
+                          </td>
+
+                          <td>
+                            {record.payment_status === "PENDING" &&
+                              selectedPeriod?.period_status === "OPEN" && (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="btn btn-primary"
+                                    disabled={
+                                      payrollCalculating ||
+                                      adminPayrollRecordsLoading
+                                    }
+                                    onClick={() =>
+                                      calculatePayrollRecord(record.id)
+                                    }
+                                  >
+                                    {payrollCalculating
+                                      ? "Calculating..."
+                                      : "Calculate"}
+                                  </button>
+
+                                  {record.payment_status === "PENDING" &&
+                                    record.statutory_rates_snapshot
+                                      ?.calculation_bases && (
+                                      <button
+                                        type="button"
+                                        className="btn btn-primary"
+                                        style={{ marginLeft: "8px" }}
+                                        disabled={
+                                          payrollApproving ||
+                                          payrollItemDeleting ||
+                                          payrollCalculating ||
+                                          adminPayrollRecordsLoading
+                                        }
+                                        onClick={() =>
+                                          approvePayrollRecord(record.id)
+                                        }
+                                      >
+                                        {payrollApproving
+                                          ? "Approving..."
+                                          : "Approve"}
+                                      </button>
+                                    )}
+
+                                  <div style={{ marginTop: "10px" }}>
+                                    {record.payroll_items
+                                      ?.filter(
+                                        (item) =>
+                                          ["EARNING", "DEDUCTION"].includes(
+                                            item.item_type,
+                                          ) &&
+                                          item.item_code !== "BASIC_SALARY",
+                                      )
+                                      .map((item) => (
+                                        <div
+                                          key={item.id}
+                                          style={{ marginBottom: "8px" }}
+                                        >
+                                          <small>
+                                            {item.description} —{" "}
+                                            {formatPayrollMoney(item.amount)}
+                                          </small>
+
+                                          <button
+                                            type="button"
+                                            className="btn btn-danger"
+                                            style={{ marginLeft: "8px" }}
+                                            disabled={payrollItemDeleting}
+                                            onClick={() =>
+                                              deletePayrollItem(
+                                                record.id,
+                                                item.id,
+                                              )
+                                            }
+                                          >
+                                            Remove
+                                          </button>
+                                        </div>
+                                      ))}
+                                  </div>
+                                </>
+                              )}
+
+                            {record.payment_status === "APPROVED" &&
+                              adminPayrollPeriodDetails?.period_status ===
+                                "APPROVED" && (
+                                <button
+                                  type="button"
+                                  className="btn btn-primary"
+                                  disabled={
+                                    payrollPaymentSubmitting ||
+                                    adminPayrollRecordsLoading
+                                  }
+                                  onClick={() => payPayrollRecord(record.id)}
+                                >
+                                  {payrollPaymentSubmitting
+                                    ? "Processing..."
+                                    : "Mark as Paid"}
+                                </button>
+                              )}
+
+                            {record.payment_status === "PAID" && (
+                              <span>Paid</span>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -2367,9 +4136,7 @@ function AdminPage({
       >
         <SimpleTable
           headers={["EMPLOYEE", "POSITION", "DEPARTMENT", "STATUS"]}
-          rows={employees
-            .slice(0, 4)
-            .map((e) => [e.name, e.role, e.dept, e.status])}
+          rows={[]}
         />
       </Panel>
     </>
@@ -3678,7 +5445,14 @@ function Stats({ items }) {
     </div>
   );
 }
-function Panel({ title, subtitle, action, onAction, children }) {
+function Panel({
+  title,
+  subtitle,
+  action,
+  onAction,
+  actionDisabled = false,
+  children,
+}) {
   return (
     <section className="panel">
       <div className="panel-heading">
@@ -3687,7 +5461,11 @@ function Panel({ title, subtitle, action, onAction, children }) {
           {subtitle && <p>{subtitle}</p>}
         </div>
         {action && (
-          <button className="text-action" onClick={onAction}>
+          <button
+            className="text-action"
+            onClick={onAction}
+            disabled={actionDisabled}
+          >
             {action}
             <ArrowUpRight size={14} />
           </button>
